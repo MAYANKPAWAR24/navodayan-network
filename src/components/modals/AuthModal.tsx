@@ -9,12 +9,13 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { toast } from "sonner";
 
 export function AuthModal() {
-  const { isAuthModalOpen, closeAuthModal, isSupabaseConfigured, loginWithEmail, signUpWithEmail } = useAuth();
+  const { isAuthModalOpen, closeAuthModal, isSupabaseConfigured, loginWithEmail, signUpWithEmail, resendSignUpConfirmation } = useAuth();
   const { playTap } = useSoundFX();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmationPending, setConfirmationPending] = useState(false);
 
   if (!isAuthModalOpen) return null;
 
@@ -26,10 +27,23 @@ export function AuthModal() {
         await loginWithEmail(email, password);
       } else {
         const signedIn = await signUpWithEmail(email, password);
+        setConfirmationPending(!signedIn);
         toast.success(signedIn ? "Account created. Complete your Navodayan profile." : "Account created. Check your email to confirm, then sign in.");
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Authentication failed. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    setIsSubmitting(true);
+    try {
+      await resendSignUpConfirmation(email);
+      toast.success("A new confirmation email has been sent. Use the latest link.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not resend the confirmation email.");
     } finally {
       setIsSubmitting(false);
     }
@@ -65,6 +79,14 @@ export function AuthModal() {
               </div>
               <button type="submit" disabled={!isSupabaseConfigured || isSubmitting} className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-navy-800 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-navy-900/20 transition-all hover:bg-navy-900 active:scale-98 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"><span>{isSubmitting ? "Please wait..." : authMode === "login" ? "Sign In" : "Create Account"}</span><ArrowRight className="h-4 w-4" /></button>
             </form>
+            {confirmationPending && authMode === "signup" && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+                <p>Confirmation is pending for {email}. If the link expires, request a fresh one and open the newest email.</p>
+                <button type="button" onClick={handleResendConfirmation} disabled={!isSupabaseConfigured || isSubmitting} className="mt-2 font-bold underline disabled:opacity-50">
+                  Resend confirmation email
+                </button>
+              </div>
+            )}
             <button type="button" onClick={() => setAuthMode((mode) => mode === "login" ? "signup" : "login")} className="w-full text-center text-xs font-semibold text-navy-700 hover:underline dark:text-blue-300">
               {authMode === "login" ? "New here? Create an account" : "Already have an account? Sign in"}
             </button>

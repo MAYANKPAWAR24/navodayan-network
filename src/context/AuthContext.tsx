@@ -19,6 +19,7 @@ interface AuthContextType {
   closeAuthModal: () => void;
   loginWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<boolean>;
+  resendSignUpConfirmation: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   saveOnboarding: (data: Partial<NavodayanProfile>) => Promise<NavodayanProfile>;
   requireAuth: (action: () => void) => void;
@@ -35,6 +36,7 @@ const AuthContext = createContext<AuthContextType>({
   closeAuthModal: () => {},
   loginWithEmail: async () => {},
   signUpWithEmail: async () => false,
+  resendSignUpConfirmation: async () => {},
   logout: async () => {},
   saveOnboarding: async () => ({} as NavodayanProfile),
   requireAuth: () => {},
@@ -82,6 +84,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const authError = url.searchParams.get("auth_error") || url.searchParams.get("error_code");
+    if (authError) {
+      const message = authError === "otp_expired"
+        ? "This confirmation link has expired or was already used. Request a new confirmation email and open its latest link."
+        : authError === "supabase_not_configured"
+          ? "Email confirmation could not be completed because Supabase is not configured."
+        : "Email confirmation could not be completed. Request a new confirmation email and try again.";
+      toast.error(message);
+      url.searchParams.delete("auth_error");
+      url.searchParams.delete("error");
+      url.searchParams.delete("error_code");
+      url.searchParams.delete("error_description");
+      url.hash = "";
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, []);
 
   useEffect(() => {
     const client = getSupabaseBrowserClient();
@@ -148,11 +169,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUpWithEmail = async (email: string, password: string) => {
     const client = getSupabaseBrowserClient();
     if (!client) throw new Error("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local.");
-    const { data, error } = await client.auth.signUp({ email, password });
+    const { data, error } = await client.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    });
     if (error) throw new Error(error.message);
     sound.playSuccess();
     if (data.session) setIsAuthModalOpen(false);
     return Boolean(data.session);
+  };
+
+  const resendSignUpConfirmation = async (email: string) => {
+    const client = getSupabaseBrowserClient();
+    if (!client) throw new Error("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local.");
+    const { error } = await client.auth.resend({
+      type: "signup",
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    });
+    if (error) throw new Error(error.message);
   };
 
   const logout = async () => {
@@ -201,6 +237,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         closeAuthModal,
         loginWithEmail,
         signUpWithEmail,
+        resendSignUpConfirmation,
         logout,
         saveOnboarding,
         requireAuth,
