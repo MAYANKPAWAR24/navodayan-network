@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, Sparkles, Mail, Lock, ArrowRight } from "lucide-react";
+import { X, Sparkles, Mail, Lock, ArrowRight, Phone } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useSoundFX } from "@/context/SoundContext";
 import { motion, AnimatePresence } from "framer-motion";
@@ -9,13 +9,16 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { toast } from "sonner";
 
 export function AuthModal() {
-  const { isAuthModalOpen, closeAuthModal, isSupabaseConfigured, loginWithEmail, signUpWithEmail, resendSignUpConfirmation } = useAuth();
+  const { isAuthModalOpen, closeAuthModal, isSupabaseConfigured, loginWithEmail, sendLoginOtp, sendSignupOtp, verifyEmailOtp } = useAuth();
   const { playTap } = useSoundFX();
   const [email, setEmail] = useState("");
+  const [mobileNumber, setMobileNumber] = useState("");
   const [password, setPassword] = useState("");
+  const [otp, setOtp] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [loginWithPassword, setLoginWithPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [confirmationPending, setConfirmationPending] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
 
   if (!isAuthModalOpen) return null;
 
@@ -24,11 +27,23 @@ export function AuthModal() {
     setIsSubmitting(true);
     try {
       if (authMode === "login") {
-        await loginWithEmail(email, password);
+        if (loginWithPassword) {
+          await loginWithEmail(email, password);
+        } else if (otpSent) {
+          await verifyEmailOtp(email, otp);
+          toast.success("Email verified. You are signed in.");
+        } else {
+          await sendLoginOtp(email);
+          setOtpSent(true);
+          toast.success("A 6-digit OTP was sent to your email.");
+        }
+      } else if (otpSent) {
+        await verifyEmailOtp(email, otp);
+        toast.success("Email verified. Complete your Navodayan profile.");
       } else {
-        const signedIn = await signUpWithEmail(email, password);
-        setConfirmationPending(!signedIn);
-        toast.success(signedIn ? "Account created. Complete your Navodayan profile." : "Account created. Check your email to confirm, then sign in.");
+        await sendSignupOtp(email, mobileNumber);
+        setOtpSent(true);
+        toast.success("A 6-digit OTP was sent to your email.");
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Authentication failed. Please try again.");
@@ -37,13 +52,15 @@ export function AuthModal() {
     }
   };
 
-  const handleResendConfirmation = async () => {
+  const handleResendOtp = async () => {
     setIsSubmitting(true);
     try {
-      await resendSignUpConfirmation(email);
-      toast.success("A new confirmation email has been sent. Use the latest link.");
+      if (authMode === "signup") await sendSignupOtp(email, mobileNumber);
+      else await sendLoginOtp(email);
+      setOtp("");
+      toast.success("A new OTP was sent. Use the latest code.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not resend the confirmation email.");
+      toast.error(error instanceof Error ? error.message : "Could not resend the OTP.");
     } finally {
       setIsSubmitting(false);
     }
@@ -71,23 +88,42 @@ export function AuthModal() {
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Email Address</label>
-                <div className="relative"><Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" /><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="alumnus@navodayan.org" className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-navy-600 dark:focus:ring-blue-500 text-slate-900 dark:text-white" /></div>
+                <div className="relative"><Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" /><input type="email" required value={email} readOnly={otpSent} onChange={(e) => setEmail(e.target.value)} placeholder="alumnus@navodayan.org" autoComplete="email" className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-navy-600 dark:focus:ring-blue-500 text-slate-900 dark:text-white read-only:opacity-70" /></div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Password</label>
-                <div className="relative"><Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" /><input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-navy-600 dark:focus:ring-blue-500 text-slate-900 dark:text-white" /></div>
-              </div>
-              <button type="submit" disabled={!isSupabaseConfigured || isSubmitting} className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-navy-800 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-navy-900/20 transition-all hover:bg-navy-900 active:scale-98 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"><span>{isSubmitting ? "Please wait..." : authMode === "login" ? "Sign In" : "Create Account"}</span><ArrowRight className="h-4 w-4" /></button>
+              {authMode === "signup" && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Mobile Number <span className="text-rose-600">*</span></label>
+                  <div className="relative"><Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" /><input type="tel" required readOnly={otpSent} value={mobileNumber} onChange={(e) => setMobileNumber(e.target.value)} placeholder="+91 9876543210" autoComplete="tel" className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-navy-600 dark:focus:ring-blue-500 text-slate-900 dark:text-white read-only:opacity-70" /></div>
+                </div>
+              )}
+              {authMode === "login" && loginWithPassword && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Password</label>
+                  <div className="relative"><Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" /><input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-navy-600 dark:focus:ring-blue-500 text-slate-900 dark:text-white" /></div>
+                </div>
+              )}
+              {otpSent && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Email OTP</label>
+                  <input type="text" required value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="Enter 6-digit code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} className="w-full px-3 py-2 text-sm tracking-[0.3em] bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-navy-600 dark:focus:ring-blue-500 text-slate-900 dark:text-white" />
+                </div>
+              )}
+              <button type="submit" disabled={!isSupabaseConfigured || isSubmitting} className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-navy-800 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-navy-900/20 transition-all hover:bg-navy-900 active:scale-98 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm"><span>{isSubmitting ? "Please wait..." : authMode === "login" && loginWithPassword ? "Sign In" : otpSent ? "Verify OTP" : "Send OTP"}</span><ArrowRight className="h-4 w-4" /></button>
             </form>
-            {confirmationPending && authMode === "signup" && (
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
-                <p>Confirmation is pending for {email}. If the link expires, request a fresh one and open the newest email.</p>
-                <button type="button" onClick={handleResendConfirmation} disabled={!isSupabaseConfigured || isSubmitting} className="mt-2 font-bold underline disabled:opacity-50">
-                  Resend confirmation email
+            {otpSent && (
+              <div className="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+                <span>OTP sent to {email}.</span>
+                <button type="button" onClick={handleResendOtp} disabled={!isSupabaseConfigured || isSubmitting} className="font-bold underline disabled:opacity-50">
+                  Resend OTP
                 </button>
               </div>
             )}
-            <button type="button" onClick={() => setAuthMode((mode) => mode === "login" ? "signup" : "login")} className="w-full text-center text-xs font-semibold text-navy-700 hover:underline dark:text-blue-300">
+            {authMode === "login" && (
+              <button type="button" onClick={() => { setLoginWithPassword((value) => !value); setOtpSent(false); setOtp(""); }} className="w-full text-center text-xs font-semibold text-navy-700 hover:underline dark:text-blue-300">
+                {loginWithPassword ? "Sign in with email OTP" : "Use password instead"}
+              </button>
+            )}
+            <button type="button" onClick={() => { setAuthMode((mode) => mode === "login" ? "signup" : "login"); setLoginWithPassword(false); setOtpSent(false); setOtp(""); }} className="w-full text-center text-xs font-semibold text-navy-700 hover:underline dark:text-blue-300">
               {authMode === "login" ? "New here? Create an account" : "Already have an account? Sign in"}
             </button>
           </div>

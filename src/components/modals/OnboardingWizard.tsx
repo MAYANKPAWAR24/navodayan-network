@@ -1,6 +1,6 @@
 "use client";
 
-import React, { ChangeEvent, useMemo, useState } from "react";
+import React, { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { Sparkles, GraduationCap, Briefcase, Droplet, ArrowRight, Share2, Upload } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useSoundFX } from "@/context/SoundContext";
@@ -49,6 +49,24 @@ export function OnboardingWizard() {
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [createdProfile, setCreatedProfile] = useState<any>(null);
+
+  useEffect(() => {
+    if (!isOnboardingOpen || !user) return;
+    setFullName(user.full_name || "");
+    setSelectedSchoolId(user.jnv_school_id || ALL_JNV_SCHOOLS[0].id);
+    setPassingYear(user.passing_year || 2018);
+    setSelectedCityName(user.current_city || "Bengaluru");
+    setProfessionCategory(user.profession_category || "IT & Software Engineering");
+    setProfessionRole(user.profession_role || "Software Engineer");
+    setOrganization(user.organization || "");
+    setBloodGroup(user.blood_group || "O+");
+    setIsBloodDonor(user.is_blood_donor ?? true);
+    setSelectedHouse(user.jnv_house || "Aravali");
+    setShowContactOnId(user.show_contact_on_id ?? false);
+    setWhatsappNumber(user.whatsapp_number || "");
+    setBio(user.bio || "Proud Navodayan!");
+    setAvatarUrl(user.avatar_url || buildInitialsAvatarUrl(user.full_name || "Navodayan"));
+  }, [isOnboardingOpen, user]);
 
   const filteredSchools = useMemo(
     () =>
