@@ -18,7 +18,9 @@ interface AuthContextType {
   openAuthModal: () => void;
   closeAuthModal: () => void;
   loginWithEmail: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (email: string, password: string) => Promise<boolean>;
+  sendLoginOtp: (email: string) => Promise<void>;
+  sendSignupOtp: (email: string, mobileNumber: string) => Promise<void>;
+  verifyEmailOtp: (email: string, otp: string) => Promise<void>;
   logout: () => Promise<void>;
   saveOnboarding: (data: Partial<NavodayanProfile>) => Promise<NavodayanProfile>;
   requireAuth: (action: () => void) => void;
@@ -34,7 +36,9 @@ const AuthContext = createContext<AuthContextType>({
   openAuthModal: () => {},
   closeAuthModal: () => {},
   loginWithEmail: async () => {},
-  signUpWithEmail: async () => false,
+  sendLoginOtp: async () => {},
+  sendSignupOtp: async () => {},
+  verifyEmailOtp: async () => {},
   logout: async () => {},
   saveOnboarding: async () => ({} as NavodayanProfile),
   requireAuth: () => {},
@@ -67,7 +71,7 @@ function createDraftProfile(authUser: SupabaseUser): NavodayanProfile {
     is_blood_donor: false,
     jnv_house: "Aravali",
     show_contact_on_id: false,
-    whatsapp_number: "",
+    whatsapp_number: String(authUser.user_metadata?.mobile_number || ""),
     is_verified: false,
     onboarding_completed: false,
     report_count: 0,
@@ -82,6 +86,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const authError = url.searchParams.get("auth_error") || url.searchParams.get("error_code");
+    if (authError) {
+      const message = authError === "otp_expired"
+        ? "This email link or OTP has expired or was already used. Request a fresh email OTP and enter the latest code."
+        : authError === "supabase_not_configured"
+          ? "Email verification could not be completed because Supabase is not configured."
+        : "Email verification could not be completed. Request a new OTP and try again.";
+      toast.error(message);
+      url.searchParams.delete("auth_error");
+      url.searchParams.delete("error");
+      url.searchParams.delete("error_code");
+      url.searchParams.delete("error_description");
+      url.hash = "";
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, []);
 
   useEffect(() => {
     const client = getSupabaseBrowserClient();
@@ -145,14 +168,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAuthModalOpen(false);
   };
 
-  const signUpWithEmail = async (email: string, password: string) => {
+  const sendSignupOtp = async (email: string, mobileNumber: string) => {
     const client = getSupabaseBrowserClient();
     if (!client) throw new Error("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local.");
-    const { data, error } = await client.auth.signUp({ email, password });
+    const digits = mobileNumber.replace(/\D/g, "");
+    if (digits.length < 10 || digits.length > 15) {
+      throw new Error("Enter a valid mobile number with 10 to 15 digits.");
+    }
+
+    const { error } = await client.auth.signInWithOtp({
+      email: email.trim(),
+      options: {
+        shouldCreateUser: true,
+        data: { mobile_number: mobileNumber.trim() },
+      },
+    });
     if (error) throw new Error(error.message);
+  };
+
+  const sendLoginOtp = async (email: string) => {
+    const client = getSupabaseBrowserClient();
+    if (!client) throw new Error("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local.");
+    const { error } = await client.auth.signInWithOtp({
+      email: email.trim(),
+      options: { shouldCreateUser: false },
+    });
+    if (error) throw new Error(error.message);
+  };
+
+  const verifyEmailOtp = async (email: string, otp: string) => {
+    const client = getSupabaseBrowserClient();
+    if (!client) throw new Error("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local.");
+    if (!/^\d{6}$/.test(otp.trim())) throw new Error("Enter the 6-digit code from your email.");
+
+    const { data, error } = await client.auth.verifyOtp({
+      email: email.trim(),
+      token: otp.trim(),
+      type: "email",
+    });
+    if (error) throw new Error(error.message);
+    if (!data.session) throw new Error("The code was accepted but sign-in did not complete. Please try again.");
+    setIsAuthModalOpen(false);
     sound.playSuccess();
-    if (data.session) setIsAuthModalOpen(false);
-    return Boolean(data.session);
   };
 
   const logout = async () => {
@@ -200,7 +257,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         openAuthModal,
         closeAuthModal,
         loginWithEmail,
-        signUpWithEmail,
+        sendLoginOtp,
+        sendSignupOtp,
+        verifyEmailOtp,
         logout,
         saveOnboarding,
         requireAuth,
