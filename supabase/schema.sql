@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     organization TEXT,
     blood_group TEXT DEFAULT 'Prefer not to say',
     is_blood_donor BOOLEAN DEFAULT false,
+    jnv_house TEXT CHECK (jnv_house IN ('Aravali', 'Nilgiri', 'Shivalik', 'Udaigiri')) DEFAULT 'Aravali',
+    show_contact_on_id BOOLEAN DEFAULT false,
     whatsapp_number TEXT NOT NULL,
     bio TEXT,
     is_verified BOOLEAN DEFAULT true,
@@ -439,3 +441,7 @@ CREATE POLICY "Admins can update feedback status" ON public.platform_feedback FO
         WHERE id = auth.uid() AND role_type = 'admin'
     )
 );
+
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS jnv_house TEXT CHECK (jnv_house IN ('Aravali', 'Nilgiri', 'Shivalik', 'Udaigiri')) DEFAULT 'Aravali';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS show_contact_on_id BOOLEAN DEFAULT false;
+ALTER TABLE public.profiles ALTER COLUMN whatsapp_number SET NOT NULL;

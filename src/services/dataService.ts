@@ -133,6 +133,8 @@ class DataService {
       navodayan_uid,
       onboarding_completed: true,
       is_verified: true,
+      jnv_house: profileData.jnv_house || this.currentUser.jnv_house || "Aravali",
+      show_contact_on_id: profileData.show_contact_on_id ?? this.currentUser.show_contact_on_id ?? false,
       role_type: profileData.role_type || (year > 2024 ? "student" : "alumni"),
     };
 

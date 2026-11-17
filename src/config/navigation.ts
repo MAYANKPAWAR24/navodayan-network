@@ -2,7 +2,7 @@ export interface NavigationItem {
   id: string;
   name: string;
   path: string;
-  iconName: string; // Lucide icon identifier
+  iconName: string;
   description: string;
   badge?: string;
   showInDesktopSidebar: boolean;
@@ -32,6 +32,19 @@ export const APP_NAVIGATION: NavigationItem[] = [
     iconName: "GraduationCap",
     description: "Search all Jawahar Navodaya Vidyalayas by state, region, district and batch",
     badge: "660+",
+    showInDesktopSidebar: true,
+    showInMobileBottomBar: true,
+    showInMobileDrawer: true,
+    showInFooter: true,
+    category: "core",
+  },
+  {
+    id: "admissions",
+    name: "NVS Admissions",
+    path: "/admissions",
+    iconName: "BookOpen",
+    description: "JNVST, lateral entry, admit cards, results and official NVS resources",
+    badge: "New",
     showInDesktopSidebar: true,
     showInMobileBottomBar: true,
     showInMobileDrawer: true,
@@ -154,8 +167,9 @@ export const APP_NAVIGATION: NavigationItem[] = [
     path: "/messages",
     iconName: "MessageSquare",
     description: "Auto-joined community channels for your School, Batch, and Current City",
+    badge: "3",
     showInDesktopSidebar: true,
-    showInMobileBottomBar: false,
+    showInMobileBottomBar: true,
     showInMobileDrawer: true,
     showInFooter: false,
     category: "community",

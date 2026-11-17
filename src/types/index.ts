@@ -40,6 +40,8 @@ export type ProfessionCategory =
   | "Arts, Media, Design & Sports"
   | "Current Student (School / College / Exam Aspirant)";
 
+export type JNVHouse = "Aravali" | "Nilgiri" | "Shivalik" | "Udaigiri";
+
 export type BloodGroup =
   | "A+"
   | "A-"
@@ -71,6 +73,8 @@ export interface NavodayanProfile {
   organization: string;
   blood_group: BloodGroup;
   is_blood_donor: boolean;
+  jnv_house?: JNVHouse;
+  show_contact_on_id?: boolean;
   whatsapp_number: string;
   bio?: string;
   is_verified: boolean;
