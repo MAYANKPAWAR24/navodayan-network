@@ -1,56 +1,132 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { NavodayanProfile } from "@/types";
-import { dataService } from "@/services/dataService";
+import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/browser";
+import { fetchSupabaseProfile, saveSupabaseProfile } from "@/services/supabaseProfileService";
 import { sound } from "@/lib/sound";
+import { toast } from "sonner";
 
 interface AuthContextType {
   user: NavodayanProfile | null;
   isAuthenticated: boolean;
+  isAuthLoading: boolean;
+  isSupabaseConfigured: boolean;
   isOnboardingOpen: boolean;
   isAuthModalOpen: boolean;
   openAuthModal: () => void;
   closeAuthModal: () => void;
-  loginWithGoogle: () => void;
-  loginWithEmail: (email: string, pass: string) => void;
-  loginDemoUser: (userIndex?: number) => void;
-  logout: () => void;
-  saveOnboarding: (data: Partial<NavodayanProfile>) => NavodayanProfile;
+  loginWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  saveOnboarding: (data: Partial<NavodayanProfile>) => Promise<NavodayanProfile>;
   requireAuth: (action: () => void) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   isAuthenticated: false,
+  isAuthLoading: true,
+  isSupabaseConfigured: false,
   isOnboardingOpen: false,
   isAuthModalOpen: false,
   openAuthModal: () => {},
   closeAuthModal: () => {},
-  loginWithGoogle: () => {},
-  loginWithEmail: () => {},
-  loginDemoUser: () => {},
-  logout: () => {},
-  saveOnboarding: () => ({} as NavodayanProfile),
+  loginWithEmail: async () => {},
+  signUpWithEmail: async () => false,
+  logout: async () => {},
+  saveOnboarding: async () => ({} as NavodayanProfile),
   requireAuth: () => {},
 });
 
+function createDraftProfile(authUser: SupabaseUser): NavodayanProfile {
+  const email = authUser.email || "";
+  const nameFromEmail = email.split("@")[0].replace(/[._-]+/g, " ");
+  const fullName = String(authUser.user_metadata?.full_name || nameFromEmail || "Navodayan")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+  return {
+    id: authUser.id,
+    navodayan_uid: "NVN-PENDING",
+    email,
+    full_name: fullName,
+    avatar_url: String(authUser.user_metadata?.avatar_url || ""),
+    jnv_school_id: "",
+    passing_year: new Date().getFullYear() - 8,
+    role_type: "alumni",
+    current_city: "Bengaluru",
+    current_state: "Karnataka",
+    current_country: "India",
+    city_lat: 12.9716,
+    city_lng: 77.5946,
+    profession_category: "IT & Software Engineering",
+    profession_role: "Navodayan",
+    organization: "",
+    blood_group: "Prefer not to say",
+    is_blood_donor: false,
+    jnv_house: "Aravali",
+    show_contact_on_id: false,
+    whatsapp_number: "",
+    is_verified: false,
+    onboarding_completed: false,
+    report_count: 0,
+    is_blocked: false,
+    created_at: new Date().toISOString(),
+  };
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<NavodayanProfile | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
 
   useEffect(() => {
-    const isAuth = dataService.getIsAuthenticated();
-    const curUser = dataService.getCurrentUser();
-    setIsAuthenticated(isAuth);
-    if (isAuth && curUser) {
-      setUser(curUser);
-      if (!curUser.onboarding_completed) {
-        setIsOnboardingOpen(true);
-      }
+    const client = getSupabaseBrowserClient();
+    if (!client) {
+      setIsAuthLoading(false);
+      return;
     }
+
+    let active = true;
+    const hydrateProfile = async (authUser: SupabaseUser | null) => {
+      if (!authUser) {
+        if (active) {
+          setUser(null);
+          setIsAuthenticated(false);
+          setIsOnboardingOpen(false);
+          setIsAuthLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const profile = await fetchSupabaseProfile(authUser.id, true);
+        if (!active) return;
+        const currentProfile = profile || createDraftProfile(authUser);
+        setUser(currentProfile);
+        setIsAuthenticated(true);
+        setIsOnboardingOpen(!currentProfile.onboarding_completed);
+        setIsAuthLoading(false);
+      } catch (error) {
+        if (!active) return;
+        setIsAuthLoading(false);
+        toast.error(error instanceof Error ? error.message : "Could not load your Navodayan profile.");
+      }
+    };
+
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+      window.setTimeout(() => {
+        void hydrateProfile(session?.user || null);
+      }, 0);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const openAuthModal = () => {
@@ -58,66 +134,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAuthModalOpen(true);
   };
 
-  const closeAuthModal = () => {
+  const closeAuthModal = () => setIsAuthModalOpen(false);
+
+  const loginWithEmail = async (email: string, password: string) => {
+    const client = getSupabaseBrowserClient();
+    if (!client) throw new Error("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local.");
+    const { error } = await client.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(error.message);
+    sound.playSuccess();
     setIsAuthModalOpen(false);
   };
 
-  const loginWithGoogle = () => {
+  const signUpWithEmail = async (email: string, password: string) => {
+    const client = getSupabaseBrowserClient();
+    if (!client) throw new Error("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local.");
+    const { data, error } = await client.auth.signUp({ email, password });
+    if (error) throw new Error(error.message);
     sound.playSuccess();
-    dataService.login();
-    const cur = dataService.getCurrentUser();
-    setUser(cur);
-    setIsAuthenticated(true);
-    setIsAuthModalOpen(false);
-    if (!cur.onboarding_completed) {
-      setIsOnboardingOpen(true);
+    if (data.session) setIsAuthModalOpen(false);
+    return Boolean(data.session);
+  };
+
+  const logout = async () => {
+    const client = getSupabaseBrowserClient();
+    if (!client) return;
+    const { error } = await client.auth.signOut();
+    if (error) {
+      toast.error(`Could not sign out: ${error.message}`);
+      return;
     }
-  };
-
-  const loginWithEmail = (email: string) => {
-    sound.playSuccess();
-    dataService.login({ email });
-    const cur = dataService.getCurrentUser();
-    setUser(cur);
-    setIsAuthenticated(true);
-    setIsAuthModalOpen(false);
-    if (!cur.onboarding_completed) {
-      setIsOnboardingOpen(true);
-    }
-  };
-
-  const loginDemoUser = (userIndex: number = 0) => {
-    sound.playSuccess();
-    const demoProfiles = dataService.getProfiles();
-    const chosen = demoProfiles[userIndex] || demoProfiles[0];
-    dataService.login(chosen);
-    setUser(chosen);
-    setIsAuthenticated(true);
-    setIsAuthModalOpen(false);
-  };
-
-  const logout = () => {
     sound.playTap();
-    dataService.logout();
-    setIsAuthenticated(false);
     setUser(null);
+    setIsAuthenticated(false);
+    setIsOnboardingOpen(false);
   };
 
-  const saveOnboarding = (data: Partial<NavodayanProfile>): NavodayanProfile => {
-    sound.playSuccess();
-    const completed = dataService.completeOnboarding(data);
+  const saveOnboarding = async (data: Partial<NavodayanProfile>) => {
+    const client = getSupabaseBrowserClient();
+    if (!client) throw new Error("Supabase is not configured. Add its URL and anon key to .env.local.");
+    const { data: { user: authUser }, error } = await client.auth.getUser();
+    if (error || !authUser) throw new Error(error?.message || "Sign in again before completing your profile.");
+
+    const completed = await saveSupabaseProfile(authUser.id, authUser.email || "", data);
     setUser(completed);
     setIsAuthenticated(true);
     setIsOnboardingOpen(false);
+    sound.playSuccess();
     return completed;
   };
 
   const requireAuth = (action: () => void) => {
-    if (isAuthenticated && user) {
-      action();
-    } else {
-      openAuthModal();
-    }
+    if (isAuthenticated && user) action();
+    else openAuthModal();
   };
 
   return (
@@ -125,13 +193,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         isAuthenticated,
+        isAuthLoading,
+        isSupabaseConfigured: isSupabaseConfigured(),
         isOnboardingOpen,
         isAuthModalOpen,
         openAuthModal,
         closeAuthModal,
-        loginWithGoogle,
         loginWithEmail,
-        loginDemoUser,
+        signUpWithEmail,
         logout,
         saveOnboarding,
         requireAuth,

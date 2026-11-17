@@ -43,10 +43,11 @@ export function OnboardingWizard() {
   const [isBloodDonor, setIsBloodDonor] = useState<boolean>(user?.is_blood_donor ?? true);
   const [selectedHouse, setSelectedHouse] = useState<JNVHouse>(user?.jnv_house || "Aravali");
   const [showContactOnId, setShowContactOnId] = useState<boolean>(user?.show_contact_on_id ?? false);
-  const [whatsappNumber, setWhatsappNumber] = useState(user?.whatsapp_number || "+91-9876543210");
+  const [whatsappNumber, setWhatsappNumber] = useState(user?.whatsapp_number || "");
   const [bio, setBio] = useState(user?.bio || "Proud Navodayan!");
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url || buildInitialsAvatarUrl(fullName || "Navodayan"));
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [createdProfile, setCreatedProfile] = useState<any>(null);
 
   const filteredSchools = useMemo(
@@ -114,7 +115,7 @@ export function OnboardingWizard() {
     setStep((prev) => prev + 1);
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
     const parsed = whatsappSchema.safeParse(whatsappNumber);
     if (!parsed.success) {
       toast.error("Please enter a valid mobile / WhatsApp number (10-digit Indian or valid international format).");
@@ -124,35 +125,42 @@ export function OnboardingWizard() {
     const school = ALL_JNV_SCHOOLS.find((s) => s.id === selectedSchoolId) || ALL_JNV_SCHOOLS[0];
     const city = ALL_CITIES_DATA.find((c) => c.city === selectedCityName) || ALL_CITIES_DATA[0];
 
-    const completed = saveOnboarding({
-      full_name: fullName,
-      avatar_url: avatarUrl,
-      jnv_school_id: school.id,
-      jnv_school_name: school.school_name,
-      passing_year: Number(passingYear),
-      current_city: city.city,
-      current_state: city.state,
-      current_country: city.country,
-      city_lat: city.latitude,
-      city_lng: city.longitude,
-      profession_category: professionCategory,
-      profession_role: professionRole,
-      organization: organization,
-      blood_group: bloodGroup,
-      is_blood_donor: isBloodDonor,
-      jnv_house: selectedHouse,
-      show_contact_on_id: showContactOnId,
-      whatsapp_number: whatsappNumber,
-      bio: bio,
-    });
-
-    setCreatedProfile(completed);
-    setStep(4);
-    playSuccess();
     try {
-      confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
-    } catch {
-      // Ignore
+      setIsSavingProfile(true);
+      const completed = await saveOnboarding({
+        full_name: fullName,
+        avatar_url: avatarUrl,
+        jnv_school_id: school.id,
+        jnv_school_name: school.school_name,
+        passing_year: Number(passingYear),
+        current_city: city.city,
+        current_state: city.state,
+        current_country: city.country,
+        city_lat: city.latitude,
+        city_lng: city.longitude,
+        profession_category: professionCategory,
+        profession_role: professionRole,
+        organization,
+        blood_group: bloodGroup,
+        is_blood_donor: isBloodDonor,
+        jnv_house: selectedHouse,
+        show_contact_on_id: showContactOnId,
+        whatsapp_number: whatsappNumber,
+        bio,
+      });
+
+      setCreatedProfile(completed);
+      setStep(4);
+      playSuccess();
+      try {
+        confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
+      } catch (error) {
+        console.warn("Profile saved, but the confetti animation was unavailable.", error);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save your profile. Please try again.");
+    } finally {
+      setIsSavingProfile(false);
     }
   };
 
@@ -167,7 +175,7 @@ export function OnboardingWizard() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/75 dark:bg-black/85 backdrop-blur-md">
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="relative w-full max-w-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-3xl shadow-2xl overflow-hidden">
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="ios-modal-scroll relative w-full max-w-xl overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
         <div className="h-1.5 w-full bg-slate-100 dark:bg-zinc-800">
           <div className="h-full bg-gradient-to-r from-navy-800 to-amber-500 transition-all duration-300" style={{ width: `${(step / 4) * 100}%` }} />
         </div>
@@ -339,7 +347,7 @@ export function OnboardingWizard() {
 
               <div className="flex gap-2 mt-4">
                 <button onClick={() => setStep(2)} className="w-1/3 py-2.5 px-3 text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-zinc-800 rounded-xl">Back</button>
-                <button onClick={handleFinish} className="w-2/3 py-2.5 px-4 text-xs font-bold text-white bg-gradient-to-r from-navy-800 to-amber-600 hover:from-navy-900 hover:to-amber-700 rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-navy-900/20 transition-all"><Sparkles className="w-4 h-4 text-amber-300" /><span>Generate My Unique ID</span></button>
+                <button onClick={handleFinish} disabled={isSavingProfile} className="flex w-2/3 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-navy-800 to-amber-600 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-navy-900/20 transition-all hover:from-navy-900 hover:to-amber-700 disabled:cursor-wait disabled:opacity-60"><Sparkles className="h-4 w-4 text-amber-300" /><span>{isSavingProfile ? "Saving profile..." : "Generate My Unique ID"}</span></button>
               </div>
             </div>
           )}

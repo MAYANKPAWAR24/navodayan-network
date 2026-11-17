@@ -36,8 +36,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  viewportFit: "cover",
   themeColor: "#1E3A8A",
 };
 
@@ -52,7 +51,7 @@ export default function RootLayout({
         <SoundProvider>
           <AuthProvider>
             <AppShell>{children}</AppShell>
-            <Toaster position="top-right" richColors closeButton />
+            <Toaster position="top-right" richColors closeButton duration={3000} />
           </AuthProvider>
         </SoundProvider>
       </body>

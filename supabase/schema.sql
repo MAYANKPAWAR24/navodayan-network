@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     full_name TEXT NOT NULL,
     avatar_url TEXT,
     jnv_school_id UUID REFERENCES public.schools(id) ON DELETE SET NULL,
+    jnv_school_name TEXT,
     passing_year INT NOT NULL,
     role_type TEXT NOT NULL DEFAULT 'alumni' CHECK (role_type IN ('alumni', 'student', 'faculty', 'admin')),
     current_city TEXT NOT NULL,
@@ -444,4 +445,185 @@ CREATE POLICY "Admins can update feedback status" ON public.platform_feedback FO
 
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS jnv_house TEXT CHECK (jnv_house IN ('Aravali', 'Nilgiri', 'Shivalik', 'Udaigiri')) DEFAULT 'Aravali';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS show_contact_on_id BOOLEAN DEFAULT false;
-ALTER TABLE public.profiles ALTER COLUMN whatsapp_number SET NOT NULL;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS jnv_school_name TEXT;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE whatsapp_number IS NULL) THEN
+        ALTER TABLE public.profiles ALTER COLUMN whatsapp_number SET NOT NULL;
+    END IF;
+END
+$$;
+
+-- Add participant-aware access for private direct conversations.
+CREATE TABLE IF NOT EXISTS public.chat_room_members (
+    room_id UUID NOT NULL REFERENCES public.chat_rooms(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (room_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_room_members_user ON public.chat_room_members(user_id, room_id);
+
+ALTER TABLE public.chat_room_members ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'profiles'
+          AND policyname = 'Authenticated users can create own profile'
+    ) THEN
+        CREATE POLICY "Authenticated users can create own profile"
+            ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'connections'
+          AND policyname = 'Members can view own connections'
+    ) THEN
+        CREATE POLICY "Members can view own connections"
+            ON public.connections FOR SELECT
+            USING (auth.uid() = requester_id OR auth.uid() = receiver_id);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'connections'
+          AND policyname = 'Authenticated users can connect'
+    ) THEN
+        CREATE POLICY "Authenticated users can connect"
+            ON public.connections FOR INSERT
+            WITH CHECK (
+                auth.uid() = requester_id
+                AND requester_id <> receiver_id
+                AND status = 'accepted'
+            );
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'chat_room_members'
+          AND policyname = 'Participants can view room members'
+    ) THEN
+        CREATE POLICY "Participants can view room members"
+            ON public.chat_room_members FOR SELECT
+            USING (auth.uid() = user_id);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'chat_rooms'
+          AND policyname = 'Participants can view chat rooms'
+    ) THEN
+        CREATE POLICY "Participants can view chat rooms"
+            ON public.chat_rooms FOR SELECT
+            USING (
+                EXISTS (
+                    SELECT 1 FROM public.chat_room_members member
+                    WHERE member.room_id = chat_rooms.id
+                      AND member.user_id = auth.uid()
+                )
+            );
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'messages'
+          AND policyname = 'Participants can read room messages'
+    ) THEN
+        CREATE POLICY "Participants can read room messages"
+            ON public.messages FOR SELECT
+            USING (
+                EXISTS (
+                    SELECT 1 FROM public.chat_room_members member
+                    WHERE member.room_id = messages.room_id
+                      AND member.user_id = auth.uid()
+                )
+            );
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'messages'
+          AND policyname = 'Participants can send room messages'
+    ) THEN
+        CREATE POLICY "Participants can send room messages"
+            ON public.messages FOR INSERT
+            WITH CHECK (
+                sender_id = auth.uid()
+                AND EXISTS (
+                    SELECT 1 FROM public.chat_room_members member
+                    WHERE member.room_id = messages.room_id
+                      AND member.user_id = auth.uid()
+                )
+            );
+    END IF;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_or_create_direct_room(other_user_id UUID)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+    current_user_id UUID := auth.uid();
+    room_reference TEXT;
+    direct_room_id UUID;
+BEGIN
+    IF current_user_id IS NULL OR other_user_id IS NULL OR current_user_id = other_user_id THEN
+        RAISE EXCEPTION 'A valid signed-in user and recipient are required';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM public.connections connection
+        WHERE connection.status = 'accepted'
+          AND (
+            (connection.requester_id = current_user_id AND connection.receiver_id = other_user_id)
+            OR (connection.requester_id = other_user_id AND connection.receiver_id = current_user_id)
+          )
+    ) THEN
+        RAISE EXCEPTION 'Connect with this member before starting a direct chat';
+    END IF;
+
+    room_reference := 'direct:' || LEAST(current_user_id::TEXT, other_user_id::TEXT)
+        || ':' || GREATEST(current_user_id::TEXT, other_user_id::TEXT);
+    PERFORM pg_advisory_xact_lock(hashtext(room_reference)::BIGINT);
+
+    SELECT id INTO direct_room_id
+    FROM public.chat_rooms
+    WHERE room_type = 'direct' AND reference_id = room_reference
+    LIMIT 1;
+
+    IF direct_room_id IS NULL THEN
+        INSERT INTO public.chat_rooms (room_type, reference_id, title)
+        VALUES ('direct', room_reference, 'Navodayan direct chat')
+        RETURNING id INTO direct_room_id;
+    END IF;
+
+    INSERT INTO public.chat_room_members (room_id, user_id)
+    VALUES (direct_room_id, current_user_id), (direct_room_id, other_user_id)
+    ON CONFLICT (room_id, user_id) DO NOTHING;
+
+    RETURN direct_room_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_or_create_direct_room(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_or_create_direct_room(UUID) TO authenticated;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime')
+       AND NOT EXISTS (
+            SELECT 1 FROM pg_publication_tables
+            WHERE pubname = 'supabase_realtime'
+              AND schemaname = 'public' AND tablename = 'messages'
+       ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
+    END IF;
+END
+$$;

@@ -42,7 +42,8 @@ class DataService {
   private messages: ChatMessage[] = [...DEMO_CHAT_MESSAGES];
   private platformFeedback: PlatformFeedbackEntry[] = [];
   private currentUser: NavodayanProfile = { ...DEMO_PROFILES[0] };
-  private isAuthenticated: boolean = true;
+  private isAuthenticated: boolean = false;
+  private connections: Record<string, string[]> = {};
   private reports: { id: string; target_type: string; target_id: string; reporter_id: string; reason: string }[] = [];
 
   constructor() {
@@ -62,9 +63,13 @@ class DataService {
       }
 
       const storedAuth = localStorage.getItem("navodaya_is_auth");
-      if (storedAuth !== null) {
-        this.isAuthenticated = storedAuth === "true";
-      }
+      this.isAuthenticated =
+        storedAuth === "true" &&
+        localStorage.getItem("navodaya_auth_method") === "manual";
+      if (!this.isAuthenticated) localStorage.setItem("navodaya_is_auth", "false");
+
+      const storedConnections = localStorage.getItem("navodaya_connections");
+      if (storedConnections) this.connections = JSON.parse(storedConnections);
 
       const storedBusinesses = localStorage.getItem("navodaya_businesses");
       if (storedBusinesses) this.businesses = JSON.parse(storedBusinesses);
@@ -113,12 +118,39 @@ class DataService {
       this.currentUser = { ...this.currentUser, ...profile };
     }
     this.persist("navodaya_is_auth", true);
+    this.persist("navodaya_auth_method", "manual");
     this.persist("navodaya_current_user", this.currentUser);
+  }
+
+  public beginManualSession(email: string): NavodayanProfile {
+    const displayName = email
+      .split("@")[0]
+      .replace(/[._-]+/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    this.currentUser = {
+      ...DEMO_PROFILES[0],
+      id: `local-${Date.now()}`,
+      navodayan_uid: "NVN-PENDING",
+      email,
+      full_name: displayName || "Navodayan",
+      jnv_school_id: "",
+      jnv_school_name: undefined,
+      whatsapp_number: "",
+      is_verified: false,
+      onboarding_completed: false,
+      created_at: new Date().toISOString(),
+    };
+    this.isAuthenticated = true;
+    this.persist("navodaya_is_auth", true);
+    this.persist("navodaya_auth_method", "manual");
+    this.persist("navodaya_current_user", this.currentUser);
+    return this.currentUser;
   }
 
   public logout() {
     this.isAuthenticated = false;
     this.persist("navodaya_is_auth", false);
+    if (typeof window !== "undefined") localStorage.removeItem("navodaya_auth_method");
   }
 
   public completeOnboarding(profileData: Partial<NavodayanProfile>): NavodayanProfile {
@@ -380,6 +412,23 @@ class DataService {
     }
 
     return list;
+  }
+
+  public getProfileById(id: string): NavodayanProfile | undefined {
+    if (this.currentUser.id === id) return this.currentUser;
+    return this.profiles.find((profile) => profile.id === id && !profile.is_blocked);
+  }
+
+  public getConnections(userId = this.currentUser.id): string[] {
+    return [...(this.connections[userId] || [])];
+  }
+
+  public connectProfile(profileId: string, userId = this.currentUser.id): void {
+    const userConnections = this.connections[userId] || [];
+    if (!userConnections.includes(profileId)) {
+      this.connections[userId] = [...userConnections, profileId];
+      this.persist("navodaya_connections", this.connections);
+    }
   }
 
   public getBloodDonors(city?: string, bloodGroup?: string): NavodayanProfile[] {

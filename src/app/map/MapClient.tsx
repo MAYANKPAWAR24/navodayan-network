@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { CityData, NavodayanProfile } from "@/types";
 import { ALL_CITIES_DATA } from "@/lib/seed/seed-cities";
 import { dataService } from "@/services/dataService";
@@ -10,14 +11,14 @@ import { useSoundFX } from "@/context/SoundContext";
 import {
   MapPin,
   Users,
-  Coffee,
   MessageSquare,
   X,
-  Share2,
-  Sparkles,
+  UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
+import { fetchConnectionIds, connectSupabaseProfile } from "@/services/supabaseMessagingService";
+import { fetchSupabaseProfiles } from "@/services/supabaseProfileService";
 
 // Dynamic import of Leaflet component to prevent SSR 'window is not defined'
 const LeafletMap = dynamic(() => import("./LeafletMapComponent"), {
@@ -30,11 +31,38 @@ const LeafletMap = dynamic(() => import("./LeafletMapComponent"), {
 });
 
 export default function MapClient() {
-  const { user, requireAuth } = useAuth();
-  const { playPop, playTap, playSuccess } = useSoundFX();
+  const { user, requireAuth, isSupabaseConfigured } = useAuth();
+  const { playTap, playSuccess } = useSoundFX();
 
   const [selectedCity, setSelectedCity] = useState<CityData | null>(null);
   const [citySearch, setCitySearch] = useState("");
+  const [connectedUsers, setConnectedUsers] = useState<string[]>([]);
+  const [remoteProfiles, setRemoteProfiles] = useState<NavodayanProfile[]>([]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !user) {
+      setConnectedUsers([]);
+      return;
+    }
+    let active = true;
+    void fetchConnectionIds(user.id).then((ids) => {
+      if (active) setConnectedUsers(ids);
+    }).catch((error: unknown) => {
+      if (active) toast.error(error instanceof Error ? error.message : "Could not load connections.");
+    });
+    return () => { active = false; };
+  }, [user, isSupabaseConfigured]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let active = true;
+    void fetchSupabaseProfiles().then((profiles) => {
+      if (active) setRemoteProfiles(profiles);
+    }).catch((error: unknown) => {
+      if (active) toast.error(error instanceof Error ? error.message : "Could not load Navodayan profiles.");
+    });
+    return () => { active = false; };
+  }, [isSupabaseConfigured]);
 
   const filteredCities = ALL_CITIES_DATA.filter((c) =>
     c.city.toLowerCase().includes(citySearch.toLowerCase()) ||
@@ -42,17 +70,24 @@ export default function MapClient() {
   );
 
   const localAlumni: NavodayanProfile[] = selectedCity
-    ? dataService.getProfiles({ city: selectedCity.city })
+    ? (isSupabaseConfigured
+      ? remoteProfiles.filter((profile) => profile.current_city.toLowerCase() === selectedCity.city.toLowerCase() && profile.id !== user?.id)
+      : dataService.getProfiles({ city: selectedCity.city }))
     : [];
 
-  const handlePingCoffee = (alumnusName: string, phone: string) => {
+  const handleConnect = (profileId: string, name: string) => {
     requireAuth(() => {
-      playSuccess();
-      const text = encodeURIComponent(
-        `☕ Hey ${alumnusName}! I saw on The Navodayan Network that you are also in ${selectedCity?.city}. Would love to catch up for coffee sometime!`
-      );
-      window.open(`https://wa.me/${phone.replace(/\D/g, "")}?text=${text}`, "_blank");
-      toast.success(`Coffee ping opened on WhatsApp for ${alumnusName}!`);
+      if (!user) return;
+      const connect = isSupabaseConfigured
+        ? connectSupabaseProfile(user.id, profileId)
+        : Promise.resolve().then(() => dataService.connectProfile(profileId));
+      void connect.then(() => {
+        setConnectedUsers((current) => current.includes(profileId) ? current : [...current, profileId]);
+        playSuccess();
+        toast.success(`Connected with ${name}. You can message them now.`);
+      }).catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : "Could not connect with this Navodayan.");
+      });
     });
   };
 
@@ -194,15 +229,18 @@ export default function MapClient() {
                     >
                       <div className="flex items-center gap-3">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={alumnus.avatar_url}
-                          alt={alumnus.full_name}
-                          className="w-10 h-10 rounded-full object-cover border border-amber-400 shrink-0"
-                        />
+                        <Link href={`/profile/${alumnus.id}`} aria-label={`View ${alumnus.full_name}'s profile`} className="shrink-0">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={alumnus.avatar_url}
+                            alt={alumnus.full_name}
+                            className="h-10 w-10 rounded-full border border-amber-400 object-cover"
+                          />
+                        </Link>
                         <div className="min-w-0 flex-1">
-                          <div className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                          <Link href={`/profile/${alumnus.id}`} className="block truncate text-xs font-bold text-slate-900 hover:text-navy-700 dark:text-white dark:hover:text-blue-300">
                             {alumnus.full_name}
-                          </div>
+                          </Link>
                           <div className="text-[11px] text-slate-600 dark:text-slate-400 truncate">
                             {alumnus.profession_role} @ {alumnus.organization}
                           </div>
@@ -217,13 +255,20 @@ export default function MapClient() {
                           {alumnus.navodayan_uid}
                         </span>
 
-                        <button
-                          onClick={() => handlePingCoffee(alumnus.full_name, alumnus.whatsapp_number)}
-                          className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg transition-colors"
-                        >
-                          <Coffee className="w-3.5 h-3.5" />
-                          <span>Ping for Coffee</span>
-                        </button>
+                        {connectedUsers.includes(alumnus.id) ? (
+                          <Link href={`/messages?user=${encodeURIComponent(alumnus.id)}`} className="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700">
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            <span>Message</span>
+                          </Link>
+                        ) : (
+                          <button
+                            onClick={() => handleConnect(alumnus.id, alumnus.full_name)}
+                            className="flex items-center gap-1 rounded-lg bg-navy-800 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-navy-900"
+                          >
+                            <UserPlus className="h-3.5 w-3.5" />
+                            <span>Connect</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))

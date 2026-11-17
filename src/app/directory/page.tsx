@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import {
   Users,
@@ -13,16 +13,17 @@ import {
   UserPlus,
   Check,
   ShieldCheck,
-  Phone,
 } from "lucide-react";
 import { dataService } from "@/services/dataService";
 import { useAuth } from "@/context/AuthContext";
 import { useSoundFX } from "@/context/SoundContext";
 import { BloodGroup, ProfessionCategory } from "@/types";
 import { toast } from "sonner";
+import { fetchConnectionIds, connectSupabaseProfile } from "@/services/supabaseMessagingService";
+import { fetchSupabaseProfiles } from "@/services/supabaseProfileService";
 
 export default function MemberDirectoryPage() {
-  const { user, requireAuth } = useAuth();
+  const { user, requireAuth, isSupabaseConfigured } = useAuth();
   const { playTap, playPop, playSuccess } = useSoundFX();
 
   const [query, setQuery] = useState("");
@@ -32,23 +33,72 @@ export default function MemberDirectoryPage() {
   const [selectedProfession, setSelectedProfession] = useState("all");
   const [selectedYear, setSelectedYear] = useState<string>("all");
   const [connectedUsers, setConnectedUsers] = useState<string[]>([]);
+  const [remoteProfiles, setRemoteProfiles] = useState<Awaited<ReturnType<typeof fetchSupabaseProfiles>>>([]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !user) {
+      setConnectedUsers([]);
+      return;
+    }
+    let active = true;
+    void fetchConnectionIds(user.id).then((ids) => {
+      if (active) setConnectedUsers(ids);
+    }).catch((error: unknown) => {
+      if (active) toast.error(error instanceof Error ? error.message : "Could not load connections.");
+    });
+    return () => { active = false; };
+  }, [user, isSupabaseConfigured]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let active = true;
+    void fetchSupabaseProfiles().then((items) => {
+      if (active) setRemoteProfiles(items);
+    }).catch((error: unknown) => {
+      if (active) toast.error(error instanceof Error ? error.message : "Could not load the Navodayan directory.");
+    });
+    return () => { active = false; };
+  }, [isSupabaseConfigured]);
 
   const profiles = useMemo(() => {
-    return dataService.getProfiles({
-      query,
-      city: selectedCity === "all" ? undefined : selectedCity,
-      bloodGroup: selectedBloodGroup === "all" ? undefined : selectedBloodGroup,
-      bloodDonorsOnly,
-      profession: selectedProfession === "all" ? undefined : selectedProfession,
-      passingYear: selectedYear === "all" ? undefined : Number(selectedYear),
+    if (!isSupabaseConfigured) {
+      return dataService.getProfiles({
+        query,
+        city: selectedCity === "all" ? undefined : selectedCity,
+        bloodGroup: selectedBloodGroup === "all" ? undefined : selectedBloodGroup,
+        bloodDonorsOnly,
+        profession: selectedProfession === "all" ? undefined : selectedProfession,
+        passingYear: selectedYear === "all" ? undefined : Number(selectedYear),
+      });
+    }
+    const normalizedQuery = query.trim().toLowerCase();
+    return remoteProfiles.filter((profile) => {
+      const matchesQuery = !normalizedQuery || [
+        profile.full_name, profile.profession_role, profile.organization, profile.jnv_school_name,
+      ].some((value) => value?.toLowerCase().includes(normalizedQuery));
+      return matchesQuery
+        && (selectedCity === "all" || profile.current_city === selectedCity)
+        && (selectedBloodGroup === "all" || profile.blood_group === selectedBloodGroup)
+        && (!bloodDonorsOnly || profile.is_blood_donor)
+        && (selectedProfession === "all" || profile.profession_category === selectedProfession)
+        && (selectedYear === "all" || profile.passing_year === Number(selectedYear))
+        && profile.id !== user?.id;
     });
-  }, [query, selectedCity, selectedBloodGroup, bloodDonorsOnly, selectedProfession, selectedYear]);
+  }, [query, selectedCity, selectedBloodGroup, bloodDonorsOnly, selectedProfession, selectedYear, isSupabaseConfigured, remoteProfiles, user]);
 
   const handleConnect = (targetUserId: string, targetName: string) => {
     requireAuth(() => {
-      playSuccess();
-      setConnectedUsers((prev) => [...prev, targetUserId]);
-      toast.success(`Connection request sent to ${targetName}!`);
+      if (!user) return;
+      const connect = isSupabaseConfigured
+        ? connectSupabaseProfile(user.id, targetUserId)
+        : Promise.resolve().then(() => dataService.connectProfile(targetUserId));
+      void connect.then(() => {
+        setConnectedUsers((prev) => prev.includes(targetUserId) ? prev : [...prev, targetUserId]);
+        playSuccess();
+        toast.success(`Connected with ${targetName}. You can message them now.`);
+      }).catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : "Could not connect with this Navodayan.");
+      });
     });
   };
 
@@ -196,17 +246,19 @@ export default function MemberDirectoryPage() {
               <div>
                 <div className="flex items-start gap-3.5 mb-3">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={profile.avatar_url}
-                    alt={profile.full_name}
-                    className="w-14 h-14 rounded-2xl object-cover border-2 border-amber-400 shrink-0"
-                  />
+                  <Link href={`/profile/${profile.id}`} aria-label={`View ${profile.full_name}'s profile`} className="shrink-0">
+                    <img
+                      src={profile.avatar_url}
+                      alt={profile.full_name}
+                      className="h-14 w-14 rounded-2xl border-2 border-amber-400 object-cover"
+                    />
+                  </Link>
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-1">
-                      <h3 className="font-bold text-sm text-slate-900 dark:text-white truncate">
+                      <Link href={`/profile/${profile.id}`} className="truncate font-bold text-sm text-slate-900 hover:text-navy-700 dark:text-white dark:hover:text-blue-300">
                         {profile.full_name}
-                      </h3>
+                      </Link>
                       {profile.is_blood_donor && (
                         <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/25 shrink-0">
                           <Droplet className="w-3 h-3 fill-rose-600" />
@@ -245,17 +297,6 @@ export default function MemberDirectoryPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <a
-                    href={`https://wa.me/${profile.whatsapp_number.replace(/\D/g, "")}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={playTap}
-                    className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
-                    title="WhatsApp Message"
-                  >
-                    <Phone className="w-4 h-4" />
-                  </a>
-
                   <button
                     onClick={() => handleConnect(profile.id, profile.full_name)}
                     disabled={isConnected}
@@ -277,6 +318,16 @@ export default function MemberDirectoryPage() {
                       </>
                     )}
                   </button>
+                  {isConnected && (
+                    <Link
+                      href={`/messages?user=${encodeURIComponent(profile.id)}`}
+                      onClick={playTap}
+                      className="flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 font-bold text-white transition-colors hover:bg-emerald-700"
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      <span>Message</span>
+                    </Link>
+                  )}
                 </div>
               </div>
             </div>
