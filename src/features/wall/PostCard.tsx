@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { Post } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import { useSoundFX } from "@/context/SoundContext";
@@ -111,24 +112,32 @@ export function PostCard({ post, onPostUpdated }: PostCardProps) {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={
-              post.is_anonymous
-                ? "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"
-                : post.author_avatar ||
-                  "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"
-            }
-            alt={post.author_name}
-            className={`w-10 h-10 rounded-full object-cover shrink-0 ${
-              post.is_anonymous ? "filter blur-xs opacity-70" : "border border-slate-200 dark:border-zinc-700"
-            }`}
-          />
+          {post.is_anonymous ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"
+              alt="Anonymous member"
+              className="h-10 w-10 shrink-0 rounded-full object-cover opacity-70 blur-xs"
+            />
+          ) : (
+            <Link href={`/profile/${post.author_id}`} aria-label={`View ${post.author_name}'s profile`} className="shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={post.author_avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"}
+                alt={post.author_name}
+                className="h-10 w-10 rounded-full border border-slate-200 object-cover dark:border-zinc-700"
+              />
+            </Link>
+          )}
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-sm text-slate-900 dark:text-white">
-                {post.author_name}
-              </span>
+              {post.is_anonymous ? (
+                <span className="font-bold text-sm text-slate-900 dark:text-white">{post.author_name}</span>
+              ) : (
+                <Link href={`/profile/${post.author_id}`} className="font-bold text-sm text-slate-900 hover:text-navy-700 dark:text-white dark:hover:text-blue-300">
+                  {post.author_name}
+                </Link>
+              )}
               {post.author_uid && (
                 <span className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.2 rounded">
                   {post.author_uid}

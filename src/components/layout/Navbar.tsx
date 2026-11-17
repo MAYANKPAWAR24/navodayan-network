@@ -49,9 +49,9 @@ export function Navbar({ onOpenSearch, onOpenMobileDrawer, isMobileDrawerOpen }:
 
         <div className="flex items-center gap-1.5 sm:gap-2">
           <button onClick={() => { playTap(); onOpenSearch(); }} className="md:hidden p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors" aria-label="Search"><Search className="w-5 h-5" /></button>
-          <button onClick={toggleMute} className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors relative" title={isMuted ? "Unmute UI Sounds" : "Mute UI Sounds"} aria-label="Toggle Sound">{isMuted ? <VolumeX className="w-5 h-5 text-slate-400" /> : <Volume2 className="w-5 h-5 text-amber-600 dark:text-amber-400" />}</button>
+          <button onClick={toggleMute} className="hidden rounded-xl p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-zinc-900 sm:block" title={isMuted ? "Unmute UI Sounds" : "Mute UI Sounds"} aria-label="Toggle Sound">{isMuted ? <VolumeX className="h-5 w-5 text-slate-400" /> : <Volume2 className="h-5 w-5 text-amber-600 dark:text-amber-400" />}</button>
           <button onClick={toggleDarkMode} className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors" title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"} aria-label="Toggle Theme">{isDarkMode ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5" />}</button>
-          <Link href="/id-card" onClick={playTap} className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-navy-800 dark:text-blue-300 bg-navy-50 dark:bg-navy-950/60 border border-navy-200/60 dark:border-navy-800/60 rounded-xl hover:bg-navy-100 dark:hover:bg-navy-900/60 transition-all shadow-sm"><CreditCard className="w-4 h-4 text-amber-600 dark:text-amber-400" /><span>Digital ID</span></Link>
+          <Link href="/id-card" onClick={playTap} aria-label="Digital ID Card" title="Digital ID Card" className="flex items-center gap-1.5 rounded-xl border border-navy-200/60 bg-navy-50 p-1.5 text-xs font-semibold text-navy-800 shadow-sm transition-all hover:bg-navy-100 dark:border-navy-800/60 dark:bg-navy-950/60 dark:text-blue-300 dark:hover:bg-navy-900/60 sm:px-3 sm:py-1.5"><CreditCard className="h-4 w-4 text-amber-600 dark:text-amber-400" /><span className="hidden sm:inline">Digital ID</span></Link>
 
           {isAuthenticated && user ? (
             <div className="relative">
@@ -72,7 +72,7 @@ export function Navbar({ onOpenSearch, onOpenMobileDrawer, isMobileDrawerOpen }:
               </AnimatePresence>
             </div>
           ) : (
-            <button onClick={openAuthModal} className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-navy-800 to-navy-700 hover:from-navy-900 hover:to-navy-800 rounded-xl shadow-md shadow-navy-900/20 active:scale-95 transition-all"><Sparkles className="w-3.5 h-3.5 text-amber-400" /><span>Join Network</span></button>
+            <button onClick={openAuthModal} aria-label="Join Network" title="Join Network" className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-navy-800 to-navy-700 p-2 text-xs font-bold text-white shadow-md shadow-navy-900/20 transition-all hover:from-navy-900 hover:to-navy-800 active:scale-95 sm:px-3.5 sm:py-1.5"><Sparkles className="h-3.5 w-3.5 text-amber-400" /><span className="hidden sm:inline">Join Network</span></button>
           )}
         </div>
       </div>
